@@ -1,0 +1,111 @@
+import pandas as pd
+import folium as fol
+import numpy as np
+def read_excel_file(filename, sheet_name):
+    df = pd.read_excel(filename, sheet_name)
+    coordinates = df[['Latitude', 'Longitude']].values
+    demands = df['Demande'].values
+    city_names = df['Ville'].values.tolist()
+    return coordinates, demands, city_names
+
+def calculate_distance_matrix(coordinates):
+    num_points = len(coordinates)
+    dist_matrix = np.zeros((num_points, num_points))
+    for i in range(num_points):
+        for j in range(num_points):
+            dist_matrix[i, j] = calculate_distance(coordinates, i, j)
+    return dist_matrix
+
+def calculate_distance(coordinates, i, j):
+    x1, y1 = coordinates[i]
+    x2, y2 = coordinates[j]
+    return np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+
+def nearest_neighbor(dist_matrix, demands, capacity):
+    num_points = dist_matrix.shape[0]
+    visited = np.zeros(num_points, dtype=bool)
+    routes = []
+
+    while np.sum(visited) < num_points:
+        current_node = 0  # Start at depot (node 0)
+        current_capacity = 0
+        route = [current_node]
+        visited[current_node] = True
+
+        while current_capacity + demands[current_node] <= capacity:
+            current = route[-1]  # Last node in the route
+            nearest = None
+            min_dist = float('inf')
+
+            for neighbor in np.where(~visited)[0]:
+                if demands[neighbor] + current_capacity <= capacity and dist_matrix[current, neighbor] < min_dist:
+                    nearest = neighbor
+                    min_dist = dist_matrix[current, neighbor]
+
+            if nearest is None:
+                break
+
+            route.append(nearest)
+            visited[nearest] = True
+            current_capacity += demands[nearest]
+
+        # Return to the depot after the route is complete
+        route.append(0)  # Adding depot as the last point in the route
+        routes.append(route)
+
+    return routes
+
+def format_output(routes, city_names):
+    return [[city_names[node] for node in route] for route in routes]
+
+def vrp_solver(filename, sheet_name, capacity):
+    coordinates, demands, city_names = read_excel_file(filename, sheet_name)
+    dist_matrix = calculate_distance_matrix(coordinates)
+    routes = nearest_neighbor(dist_matrix, demands, capacity)
+    formatted_routes = format_output(routes, city_names)
+    return formatted_routes, coordinates, city_names
+
+def create_map(coordinates, routes, city_names):
+    m = fol.Map(location=[coordinates[0][0], coordinates[0][1]], tiles="cartodb positron", zoom_start=12)
+
+    for i, coord in enumerate(coordinates):
+        fol.CircleMarker(
+            [coord[0], coord[1]],
+            radius=3.5,
+            color='blue',
+            fill=True,
+            fill_color='blue',
+            fill_opacity=0.6,
+            popup=city_names[i]
+        ).add_to(m)
+
+    fol.CircleMarker(
+        [coordinates[0][0], coordinates[0][1]],
+        radius=7,
+        color='red',
+        fill=True,
+        fill_color='red',
+        fill_opacity=0.6,
+        popup="Depot"
+    ).add_to(m)
+
+    route_colors = ['purple', 'green', 'orange', 'red', 'yellow', 'pink', 'brown']
+    for idx, route in enumerate(routes):
+        color = route_colors[idx % len(route_colors)]
+        route_coords = [(coordinates[city_names.index(node)][0], coordinates[city_names.index(node)][1]) for node in
+                        route]
+        fol.PolyLine(route_coords, color=color, weight=5, opacity=0.7).add_to(m)
+
+    m.save("vrp_map_with_return.html")
+    return m
+
+
+filename = r"C:\Users\Dima D'origine\Desktop\VRP_Dataset.xlsx"
+sheet_name = "Feuil1"
+capacity = 30
+solution, coordinates, city_names = vrp_solver(filename, sheet_name, capacity)
+
+create_map(coordinates, solution, city_names)
+
+for route in solution:
+    print(route)
